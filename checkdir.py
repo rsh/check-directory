@@ -4,6 +4,16 @@ import hashlib
 import os
 from datetime import datetime
 
+import logging
+
+logger = logging.getLogger('checkdir')
+logger.setLevel(logging.DEBUG)
+fh = logging.FileHandler('checkdir.log')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(process)d - [%(levelname)s] - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
+
 # Goals: check for bit rot, either by recalculating checksums periodically, or by comparing a directory to
 #        its backup copy.
 #   - Can be verified without knowing anything about the program that generated it.
@@ -16,12 +26,6 @@ from datetime import datetime
 #       and the date modified matches, then copy the row from the old file to the new one. Do not modify the
 #       input file. "Recent enough" will be defined on the command line.
 
-# TODO: Provide option to specify a summary file, which contains:
-#   - Number of files found
-#       - How many were checksummed
-#       - How many were skipped, and for what reason
-#           - symlink, filenotfound, etc
-#   - 
 
 # TODO: Provide option to print a log file that contains
 #   - Symlink Info:
@@ -35,33 +39,28 @@ from datetime import datetime
 #       - Total running time
 #       - How many files were checksummed
 #       - How many files were skipped
+#   - Write a summary to the log, which contains:
+#       - Number of files found
+#         - How many were checksummed
+#         - How many were skipped, and for what reason
+#             - symlink, filenotfound, etc
 
 # TODO: Provide option to specify a "debug csv out" that contains: filename, how long each file took, size in bytes
 
 # TODO: Don't overwrite output file.. error and exit.
 
 # TODO: send error messages to stderr, change exit code to error value
-# TODO: write a log
 
 # TODO: exclude the file we're writing to.
 
 # TODO: The output lists files in the topmost directory as "./foo.txt" but files that are further down the tree are
 #       listed as "baz/foo.txt" (no leading "./"). They should be consistent. 
 
-
-
 # TODO: Move to external file.
-# From: https://stackoverflow.com/a/14822210
-import math
+
 import timeparse
-def convert_size(size_bytes):
-   if size_bytes == 0:
-       return "0B"
-   size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-   i = int(math.floor(math.log(size_bytes, 1024)))
-   p = math.pow(1024, i)
-   s = round(size_bytes / p, 2)
-   return "%s %s" % (s, size_name[i])
+
+from libs.convert_size import convert_size
 
 
 parser = argparse.ArgumentParser()
@@ -75,7 +74,17 @@ args = parser.parse_args()
 root_dir = args.directory
 file_list = []
 
-print("Gathering list of files to checksum...")
+logger.info("Gathering list of files to checksum...")
+
+if not os.path.isdir(root_dir):
+    logger.info("Error - value provided for 'directory' is not a valid directory: '{}'".format(root_dir))
+    exit(1)
+
+
+num_files_checksummed = 0
+num_files_symlink = 0
+num_files_error = 0
+
 for dir_, _, files in os.walk(root_dir):
     for file_name in files:
 
@@ -90,22 +99,25 @@ for dir_, _, files in os.walk(root_dir):
         full_path = os.path.join(dir_, file_name)       # e.g. /Users/foo/mystuff/Pictures/photo.jpg
 
         if(os.path.islink(full_path)):
-            print("Skipping file because it is a symlink: '{}'".format(full_path))
+            logger.info("Skipping file because it is a symlink: '{}'".format(full_path))
+            num_files_symlink += 1
         elif(os.path.isfile(full_path)):
             file_list.append(rel_file)
-            print("Files found so far: {}".format(len(file_list))) if(len(file_list) % 1000 == 0) else None
+            logger.info("Files found so far: {}".format(len(file_list))) if(len(file_list) % 1000 == 0) else None
         else:
             # TODO: Print to stderr? Raise exception?
-            print("ERROR: Skipping file because it is somehow 'not a file' but also 'not a symlink' (that's weird): '{}')".format(full_path))
+            logger.error("ERROR: Skipping file because it is somehow 'not a file' but also 'not a symlink' (that's weird): '{}')".format(full_path))
 
-print("Done gathering list of files. Total files found: {}".format(len(file_list)))
+logger.info("Done gathering list of files. Total files found: {}".format(len(file_list)))
 
 # TODO: along with percentages and num files left, count num files / second and rolling average last 10 files size / processing time
-print("Sorting the list of files...")
+logger.info("Sorting the list of files...")
 file_list.sort()
-print("Done")
+logger.info("Done sorting the list of files")
 
 fieldnames = ["check_time", "file", "size", "time_last_modified", "checksum_type", "checksum"]
+
+
 with open(args.output, 'w', newline='') as csvfile: # TODO: Is the below code too huge to use a `with open`? What's idiomatic?
 
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -138,29 +150,33 @@ with open(args.output, 'w', newline='') as csvfile: # TODO: Is the below code to
 
                     if(file_size >  MIN_SIZE_FOR_PRINTING_PROGRESS):
                         if(size_processed_so_far % CHECKSUM_PROGRESS_UPDATE_INTERVAL == 0):
-                            print("Processing large file:\t" +
+                            logger.info("Processing large file:\t" +
                                 "{:.2%}".format(size_processed_so_far/file_size) +
                                 "\t({}/{})".format(convert_size(size_processed_so_far),convert_size(file_size)) +
                                 "\t{}/{}".format(files_checked,len(file_list)))
-                            print("\t\t{}".format(rel_file))
+                            logger.info("\t\t{}".format(rel_file))
 
                 row["checksum"] = sha512_hash.hexdigest()
                 row["checksum_type"] = "SHA-512"
                 row["check_time"] = datetime.now().isoformat()
 
                 if row["time_last_modified"] != str(os.path.getmtime(full_path)):
-                    print("Error: File {} was modified during checking. The checksum might not reflect the file's current state.".format(row["file"]))
+                    logger.error("Error: File {} was modified during checking. The checksum might not reflect the file's current state.".format(row["file"]))
+                    num_files_error += 1
+                    break
 
             writer.writerow(row)
+            num_files_checksummed += 1
         except OSError as e:
-            print("OSError on file: {}".format(row['file']))
-            print("Message: {}".format(e))
+            logger.error("OSError on file: {}".format(row['file']))
+            logger.error("Message: {}".format(e))
+            num_files_error += 1
 
         files_checked += 1
         if(files_checked % 10 == 0):
-            print("{}%\t {}/{}".format('%.2f' % round(files_checked/len(file_list) * 100, 2),files_checked,len(file_list)))
+            logger.info("{}%\t {}/{}".format('%.2f' % round(files_checked/len(file_list) * 100, 2),files_checked,len(file_list)))
 
  # TODO: Summary should include how many were checksummed, how many were imported from
  #       external file, how many were rejected from external file for being stale,
  #       how many had errors.
-print("Attempted to checksum {} files. Exiting".format(files_checked))
+logger.info("Attempted to checksum {} files. Exiting".format(files_checked))
