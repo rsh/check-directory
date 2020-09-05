@@ -6,12 +6,6 @@ from datetime import datetime
 
 import logging
 
-logger = logging.getLogger('checkdir')
-logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('checkdir.log')
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(process)d - [%(levelname)s] - %(message)s')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
 
 
 # Goals: check for bit rot, either by recalculating checksums periodically, or by comparing a directory to
@@ -58,10 +52,7 @@ logger.addHandler(fh)
 
 # TODO: Move to external file.
 
-import timeparse
-
 from libs.convert_size import convert_size
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--directory", help="The directory that contains the files that you want to checksum")
@@ -70,6 +61,12 @@ parser.add_argument("--directory", help="The directory that contains the files t
 parser.add_argument("-o", "--output", required=True, help="Output file (csv)")
 
 args = parser.parse_args()
+logger = logging.getLogger('checkdir')
+logger.setLevel(logging.DEBUG)
+fh = logging.FileHandler('checkdir.log')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(process)d - [%(levelname)s] - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
 
 root_dir = args.directory
 file_list = []
@@ -118,7 +115,7 @@ logger.info("Done sorting the list of files")
 fieldnames = ["check_time", "file", "size", "time_last_modified", "checksum_type", "checksum"]
 
 
-with open(args.output, 'w', newline='') as csvfile: # TODO: Is the below code too huge to use a `with open`? What's idiomatic?
+with open(args.output, 'w', newline='') as csvfile: # TODO: Should the file be opened and closed only to write a new line? What's idiomatic?
 
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
