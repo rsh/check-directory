@@ -59,11 +59,12 @@ parser.add_argument("--directory", help="The directory that contains the files t
 
 # TODO: should this be removed, eventually? Once we're writing to a log file, we can send the csv output to STDOUT instead.
 parser.add_argument("-o", "--output", required=True, help="Output file (csv)")
+parser.add_argument("-l", "--logfile", required=True, help="log file")
 
 args = parser.parse_args()
 logger = logging.getLogger('checkdir')
 logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('checkdir.log')
+fh = logging.FileHandler(args.logfile)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(process)d - [%(levelname)s] - %(message)s')
 fh.setFormatter(formatter)
 logger.addHandler(fh)
